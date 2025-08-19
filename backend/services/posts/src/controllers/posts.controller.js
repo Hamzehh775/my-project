@@ -15,7 +15,6 @@ export async function listAllPosts(_req, res) {
   }
 }
 
-
 export async function listPostsByUser(req, res) {
   try {
     const userId = Number(req.params.userId);

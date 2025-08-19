@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
 
 export default function UsersTable() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  const navigate = useNavigate();
 
   async function fetchUsers() {
     try {
@@ -47,16 +49,24 @@ export default function UsersTable() {
             <tr key={u.id}>
               <td>{u.id}</td>
               <td>
-                <a
-                  href="#"
+                {/* Use a button + programmatic navigate to avoid any global <a>-click handlers */}
+                <button
+                  type="button"
                   onClick={(e) => {
-                    e.preventDefault();
-                    window.dispatchEvent(new CustomEvent('open-user-posts', { detail: u }));
+                    e.stopPropagation();
+                    navigate(`/users/${u.id}`);
                   }}
-                  style={{ color: '#60a5fa' }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    color: '#60a5fa',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                  }}
                 >
                   {u.username}
-                </a>
+                </button>
               </td>
               <td>{u.email}</td>
               <td>{u.postCount}</td>
@@ -92,8 +102,6 @@ export default function UsersTable() {
           )}
         </tbody>
       </table>
-      
-
     </div>
   );
 }

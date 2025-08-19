@@ -13,6 +13,32 @@ export async function listUsers(req, res) {
     res.status(500).json({ message: 'Internal error' });
   }
 }
+export async function getUser(req, res) {
+  const id = Number(req.params.id);
+  console.log('[getUser] start id =', id);
+
+  try {
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    console.log('[getUser] before query');
+    const { rows } = await client.query(
+      `SELECT id, username, email, created_at
+         FROM users
+        WHERE id = $1`,
+      [id]
+    );
+    console.log('[getUser] after query, rows =', rows.length);
+
+    if (!rows.length) return res.status(404).json({ message: 'User not found' });
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error('[getUser] error:', err);
+    return res.status(500).json({ message: 'Internal error' });
+  }
+}
+
 
 export async function createUser(req, res) {
   try {
@@ -33,14 +59,23 @@ export async function createUser(req, res) {
   }
 }
 
+
 export async function deleteUser(req, res) {
+  const id = Number(req.params.id);
+  console.log('[deleteUser] start id =', id);
+
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid user id' });
+  }
+
   try {
-    const id = Number(req.params.id);
-    const result = await client.query(`DELETE FROM users WHERE id = $1`, [id]);
-    if (result.rowCount === 0) return res.status(404).json({ message: 'User not found' });
-    res.json({ message: 'User (and posts) deleted' }); // posts will cascade in DB
+    const result = await client.query('DELETE FROM users WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    return res.json({ message: 'User deleted' });
   } catch (err) {
-    console.error('deleteUser error:', err.message);
-    res.status(500).json({ message: 'Internal error' });
+    console.error('[deleteUser] error:', err);
+    return res.status(500).json({ message: 'Internal error' });
   }
 }
