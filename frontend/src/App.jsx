@@ -1,15 +1,16 @@
 // App.jsx
 import { useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
-
+import UsersPage from "./components/UsersPage";
 import Modal from "./components/Modal";
 import Dashboard from "./components/Dashboard.jsx";
 import UserPostsModal from "./components/UserPostsModal.jsx";
 import UserPostsPage from "./components/UserPostsPage.jsx";
 import { api } from "./lib/api";
+import AllPostsPage from "./components/AllPostsPage";
 
 export default function App() {
-  const navigate = useNavigate(); // 👈 required so navigate(...) works
+  const navigate = useNavigate();
 
   const [usersOpen, setUsersOpen] = useState(false);
   const [postsOpen, setPostsOpen] = useState(false);
@@ -20,7 +21,27 @@ export default function App() {
   const [error, setError] = useState("");
   const [newUser, setNewUser] = useState({ username: "", email: "" });
 
-  // when UserPostsModal tells us to refresh counts
+
+  function Home({ error }) {
+  const navigate = useNavigate();
+
+  return (
+    <div style={styles.card}>
+      <h1 style={styles.h1}>Admin Dashboard</h1>
+      <p style={styles.sub}></p>
+      <div style={styles.row}>
+        <button onClick={() => navigate("/users")} style={styles.btn}>
+          Users
+        </button>
+        <button onClick={() => navigate("/posts")} style={styles.btn}>
+          All Posts
+        </button>
+      </div>
+      {error && <div style={styles.error}>{error}</div>}
+    </div>
+  );
+}
+
   useEffect(() => {
     function onRefresh() {
       if (usersOpen) fetchUsers();
@@ -32,7 +53,7 @@ export default function App() {
   async function fetchUsers() {
     try {
       setLoadingUsers(true);
-      const data = await api.listUsers(); // /api/users/with-counts
+      const data = await api.listUsers();
       setUsers(data);
     } catch (e) {
       setError(e.message);
@@ -79,20 +100,6 @@ export default function App() {
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.h1}>Admin Dashboard</h1>
-        <p style={styles.sub}></p>
-        <div style={styles.row}>
-          <button onClick={openUsers} style={styles.btn}>
-            Users
-          </button>
-          <button onClick={openPosts} style={styles.btn}>
-            All Posts
-          </button>
-        </div>
-        {error && <div style={styles.error}>{error}</div>}
-      </div>
-
       {/* Users popup */}
       <Modal open={usersOpen} onClose={() => setUsersOpen(false)} title="Users">
         {loadingUsers ? (
@@ -147,14 +154,12 @@ export default function App() {
                   {users.map((u) => (
                     <tr key={u.id}>
                       <td>{u.id}</td>
-
-                      {/* ✅ Single <td> for username; close modal then navigate */}
                       <td>
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setUsersOpen(false); // close the modal so the page is visible
+                            setUsersOpen(false);
                             navigate(`/users/${u.id}`);
                           }}
                           style={{
@@ -169,12 +174,9 @@ export default function App() {
                           {u.username}
                         </button>
                       </td>
-
                       <td>{u.email}</td>
                       <td>{u.postCount}</td>
-
                       <td style={{ display: "flex", gap: 8 }}>
-                        {/* Keep popup behavior for "Add Post" */}
                         <button
                           style={styles.smallBtn}
                           onClick={() =>
@@ -185,7 +187,6 @@ export default function App() {
                         >
                           Add Post
                         </button>
-
                         <button
                           style={{ ...styles.smallBtn, ...styles.danger }}
                           onClick={async () => {
@@ -211,10 +212,19 @@ export default function App() {
         )}
       </Modal>
 
-      {/* App routes (App is already under BrowserRouter in main.jsx) */}
+      {/* App routes */}
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/users/:id" element={<UserPostsPage />} />
+        {/* Home */}
+        <Route path="/" element={<Home />} />
+
+        {/* Users list page */}
+        <Route path="/users" element={<UsersPage />} />
+
+        {/* User’s posts page */}
+         <Route path="/users/:id/posts" element={<UserPostsPage />} />
+
+        {/* All posts page */}
+        <Route path="/posts" element={<AllPostsPage />} />
       </Routes>
 
       {/* All posts popup */}
@@ -256,7 +266,7 @@ export default function App() {
                     onClick={async () => {
                       await api.deletePost(p.id);
                       setPosts((prev) => prev.filter((x) => x.id !== p.id));
-                      window.dispatchEvent(new Event("refresh-users")); // keep counts in sync
+                      window.dispatchEvent(new Event("refresh-users"));
                     }}
                   >
                     Delete

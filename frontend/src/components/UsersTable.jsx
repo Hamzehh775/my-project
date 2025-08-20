@@ -1,18 +1,17 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom'; // ✅ use Link for client-side navigation
 
 export default function UsersTable() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const navigate = useNavigate();
 
   async function fetchUsers() {
     try {
       setErr('');
       setLoading(true);
-      const data = await api.listUsers(); // GET /api/users/with-counts
+      const data = await api.listUsers(); // GET /api/users/with-counts (or /api/users)
       setUsers(data);
     } catch (e) {
       setErr(e.message || 'Failed to load users');
@@ -21,7 +20,6 @@ export default function UsersTable() {
     }
   }
 
-  // initial load + listen for global refresh (fired by the posts modal)
   useEffect(() => {
     fetchUsers();
     const onRefresh = () => fetchUsers();
@@ -38,7 +36,7 @@ export default function UsersTable() {
         <thead>
           <tr>
             <th>ID</th>
-            <th>Username (click to view posts)</th>
+            <th>Username</th>
             <th>Email</th>
             <th># Posts</th>
             <th>Actions</th>
@@ -48,29 +46,22 @@ export default function UsersTable() {
           {users.map(u => (
             <tr key={u.id}>
               <td>{u.id}</td>
+
+              {/* 👉 Username is now a real link to /users/:id/posts */}
               <td>
-                {/* Use a button + programmatic navigate to avoid any global <a>-click handlers */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate(`/users/${u.id}`);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    color: '#60a5fa',
-                    cursor: 'pointer',
-                    textDecoration: 'underline',
-                  }}
+                <Link
+                  to={`/users/${u.id}/posts`}       // absolute path
+                  style={styles.usernameLink}
                 >
                   {u.username}
-                </button>
+                </Link>
               </td>
+
               <td>{u.email}</td>
               <td>{u.postCount}</td>
+
               <td style={{ display: 'flex', gap: 8 }}>
+                {/* Keep your existing modal trigger if you still use it */}
                 <button
                   style={styles.btn}
                   onClick={() =>
@@ -79,13 +70,18 @@ export default function UsersTable() {
                 >
                   Add Post
                 </button>
+
+                {/* Optional: quick "View Posts" button that does the same as clicking the username */}
+                <Link to={`/users/${u.id}/posts`} style={{ ...styles.btn, textDecoration: 'none' }}>
+                  View Posts
+                </Link>
+
                 <button
                   style={{ ...styles.btn, ...styles.danger }}
                   onClick={async () => {
                     if (!confirm(`Delete user ${u.username}? Their posts will be removed too.`)) return;
                     await api.deleteUser(u.id);
                     setUsers(prev => prev.filter(x => x.id !== u.id));
-                    // counts will naturally update since the user row is removed
                   }}
                 >
                   Delete
@@ -93,6 +89,7 @@ export default function UsersTable() {
               </td>
             </tr>
           ))}
+
           {users.length === 0 && (
             <tr>
               <td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', padding: 12 }}>
@@ -108,6 +105,11 @@ export default function UsersTable() {
 
 const styles = {
   table: { width: '100%', borderCollapse: 'collapse' },
+  usernameLink: {
+    color: '#60a5fa',
+    textDecoration: 'underline',
+    cursor: 'pointer',
+  },
   btn: {
     padding: '6px 10px',
     borderRadius: 10,
