@@ -1,7 +1,7 @@
 // src/components/UserPostsPage.jsx
 import { useParams, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api"; // ✅ reuse your users API helper
+import { api } from "../lib/api";
 
 // Posts service base (no /api prefix)
 const POSTS_API = import.meta.env.VITE_POSTS_API ?? "http://localhost:4002/posts";
@@ -10,9 +10,40 @@ export default function UserPostsPage() {
   const { id } = useParams();
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [imageUrls, setImageUrls] = useState({}); // ✅ CHANGED: hold resolved image URLs by post.id
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [notFound, setNotFound] = useState(false);
+
+  // ✅ CHANGED: helper to sign/resolve a URL when we only have image_key
+  async function signKey(key) {
+    // Prefer your project's API helper if it exists (e.g., api.signImage / api.getImageUrl)
+    if (typeof api?.signImage === "function") {
+      const { url } = await api.signImage(key); // expect { url }
+      return url;
+    }
+    if (typeof api?.getImageUrl === "function") {
+      const { url } = await api.getImageUrl(key); // expect { url }
+      return url;
+    }
+
+    // Fallback: call posts service signing endpoint (adjust if your route differs)
+    // This expects the backend to respond with: { url: "https://..." }
+    const r = await fetch(`${POSTS_API}/images/${encodeURIComponent(key)}/signed`);
+    if (!r.ok) throw new Error(`Failed to sign image: HTTP ${r.status}`);
+    const j = await r.json();
+    return j.url;
+  }
+
+  // ✅ CHANGED: pick best available URL for a post without additional calls
+  function resolveImageUrlLocal(p) {
+    return (
+      p.signed_url ||
+      p.image_url ||
+      p.image?.url ||     // sometimes backend nests it
+      null
+    );
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +58,7 @@ export default function UserPostsPage() {
         let list = [];
         try {
           list = await api.listUsers(); // usually /api/users/with-counts
-        } catch (e) {
+        } catch {
           throw new Error("Failed to load users");
         }
 
@@ -48,7 +79,6 @@ export default function UserPostsPage() {
         const rp = await fetch(`${POSTS_API}/user/${encodeURIComponent(id)}`);
         if (!rp.ok) {
           if (rp.status === 404) {
-            // Some backends 404 when no posts — normalize to empty list
             if (!cancelled) setPosts([]);
           } else {
             throw new Error(`Posts API error: HTTP ${rp.status}`);
@@ -61,6 +91,33 @@ export default function UserPostsPage() {
             ? raw.posts
             : [];
           if (!cancelled) setPosts(list);
+
+          // ✅ CHANGED: after posts load, resolve URLs for any images missing a direct URL
+          // Strategy:
+          // - If the post already has a URL (signed_url/image_url/image?.url) -> use it.
+          // - Else if it has image_key -> sign it now.
+          const entries = await Promise.all(
+            list.map(async (p) => {
+              const local = resolveImageUrlLocal(p);
+              if (local) return [p.id, local];
+
+              if (p.image_key) {
+                try {
+                  const url = await signKey(p.image_key);
+                  return [p.id, url];
+                } catch (e) {
+                  console.warn("Signing failed for", p.image_key, e);
+                  return [p.id, null];
+                }
+              }
+
+              return [p.id, null];
+            })
+          );
+
+          if (!cancelled) {
+            setImageUrls(Object.fromEntries(entries));
+          }
         }
       } catch (e) {
         if (!cancelled) setErr(e.message || "Failed to load");
@@ -95,13 +152,26 @@ export default function UserPostsPage() {
         {!loading && !err && !notFound && (
           posts.length ? (
             <ul style={styles.list}>
-              {posts.map((p) => (
-                <li key={p.id} style={styles.postItem}>
-                  <h3 style={styles.postTitle}>{p.title}</h3>
-                  <div>{p.content}</div>
-                  <div style={styles.meta}>Post #{p.id} • user {p.user_id}</div>
-                </li>
-              ))}
+              {posts.map((p) => {
+                const imgSrc =
+                  resolveImageUrlLocal(p) ?? imageUrls[p.id] ?? null; // ✅ CHANGED: choose final URL
+
+                return (
+                  <li key={p.id} style={styles.postItem}>
+                    <h3 style={styles.postTitle}>{p.title}</h3>
+
+                    {/* ✅ CHANGED: render image if available */}
+                    {imgSrc && (
+                      <div style={styles.imageWrap}>
+                        <img src={imgSrc} alt={p.title} style={styles.image} />
+                      </div>
+                    )}
+
+                    <div>{p.content}</div>
+                    <div style={styles.meta}>Post #{p.id} • user {p.user_id}</div>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p>No posts for this user.</p>
@@ -125,4 +195,8 @@ const styles = {
   meta: { fontSize: 12, color: "#666" },
   error: { color: "tomato" },
   notfound: { color: "#ef4444", fontWeight: 700 },
+
+  // ✅ CHANGED: styles for images
+  imageWrap: { margin: "8px 0 10px" },
+  image: { width: "100%", maxHeight: 380, objectFit: "cover", borderRadius: 10, border: "1px solid #eef1f6" },
 };

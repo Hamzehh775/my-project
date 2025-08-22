@@ -17,7 +17,7 @@ export const api = {
   addUser: (data) => http('/users', { method: 'POST', body: JSON.stringify(data) }),
   deleteUser: (id) => http(`/users/${id}`, { method: 'DELETE' }),
 
-  listPostsEnriched: () => http('/posts-enriched'),
+  listPostsEnriched: () => http('/posts'),
   listUserPosts: (userId) => http(`/posts/user/${userId}`),
   addPost: (userId, data) => http(`/posts/user/${userId}`, { method: 'POST', body: JSON.stringify(data) }),
   deletePost: (id) => http(`/posts/${id}`, { method: 'DELETE' }),

@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 
-const API_BASE = "http://localhost:5000/api"; // adjust if different
+const API_BASE = "http://localhost:5000/api";     // your gateway API
+const UPLOADS_BASE = "http://localhost:5000";      // for /uploads/s3-get
 
 const styles = {
   page: {
@@ -54,20 +55,44 @@ export default function AllPostsPage() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+
+    async function loadAllPosts() {
+      setLoading(true);
+      setErr("");
       try {
-        setErr("");
-        setLoading(true);
-        const res = await fetch(`${API_BASE}/posts`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setPosts(Array.isArray(data) ? data : []);
+        // 1) fetch all posts
+        const resp = await fetch(`${API_BASE}/posts`);
+        if (!resp.ok) throw new Error("Failed to load posts");
+        const data = await resp.json();
+
+        // 2) enrich image URLs (if image_key present)
+        const enriched = await Promise.all(
+          data.map(async (p) => {
+            if (!p.image_key) return p;
+            try {
+              const r = await fetch(
+                `${UPLOADS_BASE}/uploads/s3-get?key=${encodeURIComponent(p.image_key)}`
+              );
+              if (!r.ok) return p;
+              const { url } = await r.json();
+              return { ...p, imageUrl: url };
+            } catch {
+              return p;
+            }
+          })
+        );
+
+        if (alive) setPosts(enriched);
       } catch (e) {
-        setErr(e.message || "Failed to load posts");
+        if (alive) setErr(e.message || "Error loading posts");
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
-    })();
+    }
+
+    loadAllPosts();
+    return () => { alive = false; };
   }, []);
 
   return (
@@ -89,6 +114,15 @@ export default function AllPostsPage() {
             {posts.map((p) => (
               <li key={p.id} style={styles.postItem}>
                 <h3 style={styles.postTitle}>{p.title}</h3>
+
+                {p.imageUrl && (
+                  <img
+                    src={p.imageUrl}
+                    alt=""
+                    style={{ maxWidth: 260, borderRadius: 8, marginTop: 8, display: "block" }}
+                  />
+                )}
+
                 <div>{p.content}</div>
                 <div style={styles.meta}>Post #{p.id} • by user {p.user_id}</div>
               </li>

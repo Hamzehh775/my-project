@@ -8,8 +8,9 @@ export default function UserPostsModal() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [preview, setPreview] = useState(null); 
+  const [file, setFile] = useState(null);
   const [form, setForm] = useState({ title: "", content: "" });
-
   // Load posts for a user
   async function loadPosts(userId) {
     setLoading(true);
@@ -27,28 +28,59 @@ export default function UserPostsModal() {
   }
 
   // Add a new post
+
   async function addPost(e) {
-    e.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const resp = await fetch(`http://localhost:5000/api/posts/user/${user.id}`, {
+  e.preventDefault();
+  setSaving(true);
+  setError("");
+
+  try {
+    let imageKey = null;
+    let imageMime = null;
+    let imageSize = null;
+
+    // 1) if a file was chosen, upload it to the gateway
+    if (file) {
+      const fd = new FormData();
+      fd.append("image", file);
+
+      const upResp = await fetch("http://localhost:5000/uploads/image", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: form.title.trim(),
-          content: form.content.trim(),
-        }),
+        body: fd,
       });
-      if (!resp.ok) throw new Error("Failed to add post");
-      setForm({ title: "", content: "" });
-      await loadPosts(user.id); // Refresh posts
-    } catch (err) {
-      setError(err.message || "Error adding post");
-    } finally {
-      setSaving(false);
+      if (!upResp.ok) throw new Error("Upload failed");
+      const up = await upResp.json(); // { key }
+      imageKey = up.key;
+      imageMime = file.type;
+      imageSize = file.size;
     }
+
+    // 2) create the post (include image fields if present)
+    const resp = await fetch(`http://localhost:5000/api/posts/user/${user.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: form.title.trim(),
+        content: form.content.trim(),
+        imageKey,
+        imageMime,
+        imageSize,
+      }),
+    });
+    if (!resp.ok) throw new Error("Failed to add post");
+
+    // 3) reset and refresh
+    setForm({ title: "", content: "" });
+    setFile(null);
+    setPreview(null);
+    await loadPosts(user.id);
+  } catch (err) {
+    setError(err.message || "Error adding post");
+  } finally {
+    setSaving(false);
   }
+}
+
 
   // Listen for global "open-user-posts" event
   useEffect(() => {
@@ -69,6 +101,8 @@ export default function UserPostsModal() {
     setPosts([]);
     setForm({ title: "", content: "" });
     setError("");
+    setFile(null);
+    setPreview(null);
   }
 
   if (!open) return null;
@@ -96,6 +130,25 @@ export default function UserPostsModal() {
             onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
             style={{...sx.input, height: 90, resize: "vertical"}}
           />
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              setFile(f);
+              setPreview(f ? URL.createObjectURL(f) : null);
+            }}
+            style={sx.input}
+          />
+          {preview && (
+            <img
+             src={preview}
+             alt="preview"
+             style={{ maxWidth: 220, borderRadius: 8, marginTop: 6 }}
+             />
+          )}
+
+
           <button type="submit" disabled={saving} style={sx.btn}>
             {saving ? "Saving…" : "Add Post"}
           </button>
