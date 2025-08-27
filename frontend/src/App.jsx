@@ -1,4 +1,3 @@
-// App.jsx
 import { useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import UsersPage from "./components/UsersPage";
