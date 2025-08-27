@@ -5,44 +5,66 @@ import { api } from "../lib/api";
 
 // Posts service base (no /api prefix)
 const POSTS_API = import.meta.env.VITE_POSTS_API ?? "http://localhost:4002/posts";
+const UPLOADS_BASE = "http://localhost:5000";
 
 export default function UserPostsPage() {
   const { id } = useParams();
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
-  const [imageUrls, setImageUrls] = useState({}); // ✅ CHANGED: hold resolved image URLs by post.id
+  const [imageUrls, setImageUrls] = useState({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [notFound, setNotFound] = useState(false);
+  const [deleting, setDeleting] = useState({}); // track deletes per post
 
-  // ✅ CHANGED: helper to sign/resolve a URL when we only have image_key
   async function signKey(key) {
-    // Prefer your project's API helper if it exists (e.g., api.signImage / api.getImageUrl)
+    if (!key) return null;
+
     if (typeof api?.signImage === "function") {
-      const { url } = await api.signImage(key); // expect { url }
+      const { url } = await api.signImage(key);
       return url;
     }
     if (typeof api?.getImageUrl === "function") {
-      const { url } = await api.getImageUrl(key); // expect { url }
+      const { url } = await api.getImageUrl(key);
       return url;
     }
 
-    // Fallback: call posts service signing endpoint (adjust if your route differs)
-    // This expects the backend to respond with: { url: "https://..." }
-    const r = await fetch(`${POSTS_API}/images/${encodeURIComponent(key)}/signed`);
-    if (!r.ok) throw new Error(`Failed to sign image: HTTP ${r.status}`);
-    const j = await r.json();
-    return j.url;
+    const r = await fetch(`${UPLOADS_BASE}/uploads/s3-get?key=${encodeURIComponent(key)}`);
+    if (!r.ok) throw new Error("Failed to get signed URL");
+    const { url } = await r.json();
+    return url; // fixed typo
   }
 
-  // ✅ CHANGED: pick best available URL for a post without additional calls
   function resolveImageUrlLocal(p) {
-    return (
-      p.signed_url ||
-      p.image_url ||
-      p.image?.url ||     // sometimes backend nests it
-      null
-    );
+    return p.signed_url || p.image_url || p.image?.url || null;
+  }
+
+  async function handleDelete(p) {
+    if (deleting[p.id]) return;
+    const ok = confirm(`Delete post #${p.id}? This cannot be undone.`);
+    if (!ok) return;
+
+    setDeleting(prev => ({ ...prev, [p.id]: true }));
+    try {
+      const resp = await fetch(`${POSTS_API}/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+      if (!resp.ok) throw new Error(`Delete failed: HTTP ${resp.status}`);
+
+      // Optimistically remove from UI
+      setPosts(prev => prev.filter(x => x.id !== p.id));
+      setImageUrls(prev => {
+        const copy = { ...prev };
+        delete copy[p.id];
+        return copy;
+      });
+    } catch (e) {
+      alert(e.message || "Failed to delete post");
+    } finally {
+      setDeleting(prev => {
+        const copy = { ...prev };
+        delete copy[p.id];
+        return copy;
+      });
+    }
   }
 
   useEffect(() => {
@@ -54,17 +76,15 @@ export default function UserPostsPage() {
         setErr("");
         setNotFound(false);
 
-        // 1) Check if user exists using your existing helper
+        // 1) verify user exists
         let list = [];
         try {
-          list = await api.listUsers(); // usually /api/users/with-counts
+          list = await api.listUsers();
         } catch {
           throw new Error("Failed to load users");
         }
 
-        const u =
-          Array.isArray(list) ? list.find((x) => String(x.id) === String(id)) : null;
-
+        const u = Array.isArray(list) ? list.find(x => String(x.id) === String(id)) : null;
         if (!u) {
           if (!cancelled) {
             setNotFound(true);
@@ -72,10 +92,9 @@ export default function UserPostsPage() {
           }
           return;
         }
-
         if (!cancelled) setUser(u);
 
-        // 2) Fetch this user's posts from the posts service
+        // 2) fetch user posts
         const rp = await fetch(`${POSTS_API}/user/${encodeURIComponent(id)}`);
         if (!rp.ok) {
           if (rp.status === 404) {
@@ -85,17 +104,9 @@ export default function UserPostsPage() {
           }
         } else {
           const raw = await rp.json();
-          const list = Array.isArray(raw)
-            ? raw
-            : Array.isArray(raw.posts)
-            ? raw.posts
-            : [];
-          if (!cancelled) setPosts(list);
+          const list = Array.isArray(raw) ? raw : Array.isArray(raw.posts) ? raw.posts : [];
 
-          // ✅ CHANGED: after posts load, resolve URLs for any images missing a direct URL
-          // Strategy:
-          // - If the post already has a URL (signed_url/image_url/image?.url) -> use it.
-          // - Else if it has image_key -> sign it now.
+          // Enrich image URLs (same logic as AllPostsPage)
           const entries = await Promise.all(
             list.map(async (p) => {
               const local = resolveImageUrlLocal(p);
@@ -104,18 +115,18 @@ export default function UserPostsPage() {
               if (p.image_key) {
                 try {
                   const url = await signKey(p.image_key);
-                  return [p.id, url];
+                  return [p.id, url ?? null];
                 } catch (e) {
                   console.warn("Signing failed for", p.image_key, e);
                   return [p.id, null];
                 }
               }
-
               return [p.id, null];
             })
           );
 
           if (!cancelled) {
+            setPosts(list);
             setImageUrls(Object.fromEntries(entries));
           }
         }
@@ -153,14 +164,22 @@ export default function UserPostsPage() {
           posts.length ? (
             <ul style={styles.list}>
               {posts.map((p) => {
-                const imgSrc =
-                  resolveImageUrlLocal(p) ?? imageUrls[p.id] ?? null; // ✅ CHANGED: choose final URL
+                const imgSrc = resolveImageUrlLocal(p) ?? imageUrls[p.id] ?? null;
 
                 return (
                   <li key={p.id} style={styles.postItem}>
-                    <h3 style={styles.postTitle}>{p.title}</h3>
+                    <div style={styles.postHeader}>
+                      <h3 style={styles.postTitle}>{p.title}</h3>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        disabled={!!deleting[p.id]}
+                        style={styles.deleteBtn}
+                        title="Delete post"
+                      >
+                        {deleting[p.id] ? "Deleting…" : "Delete"}
+                      </button>
+                    </div>
 
-                    {/* ✅ CHANGED: render image if available */}
                     {imgSrc && (
                       <div style={styles.imageWrap}>
                         <img src={imgSrc} alt={p.title} style={styles.image} />
@@ -191,12 +210,25 @@ const styles = {
   btnLink: { padding: "8px 14px", borderRadius: 10, background: "#3B82F6", color: "#fff", fontWeight: 600, textDecoration: "none" },
   list: { display: "grid", gap: 12, marginTop: 8 },
   postItem: { background: "#fff", border: "1px solid #eef1f6", borderRadius: 12, padding: 14, boxShadow: "0 4px 16px rgba(0,0,0,0.06)" },
+
+  postHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 },
   postTitle: { margin: "0 0 6px", fontSize: 18 },
+
+  // smaller images
+  imageWrap: { margin: "8px 0 10px", maxWidth: 260 }, // constrain width
+  image: { width: "100%", height: "auto", objectFit: "cover", borderRadius: 10, border: "1px solid #eef1f6" },
+
   meta: { fontSize: 12, color: "#666" },
   error: { color: "tomato" },
   notfound: { color: "#ef4444", fontWeight: 700 },
 
-  // ✅ CHANGED: styles for images
-  imageWrap: { margin: "8px 0 10px" },
-  image: { width: "100%", maxHeight: 380, objectFit: "cover", borderRadius: 10, border: "1px solid #eef1f6" },
+  deleteBtn: {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: "1px solid #fca5a5",
+    background: "#fee2e2",
+    color: "#b91c1c",
+    cursor: "pointer",
+    fontWeight: 600,
+  },
 };
